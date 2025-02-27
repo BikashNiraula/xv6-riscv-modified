@@ -91,3 +91,49 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+//add a new syscall sys_getprocs
+struct uproc {
+  int pid;
+  int state;
+  uint64 sz;
+  char name[16];
+};
+
+uint64
+sys_getprocs(void)
+{
+  int max;
+  uint64 uptr;  // User pointer to struct uproc array
+  struct proc *p;
+  struct uproc up;
+  int count = 0;
+  extern struct proc proc[];  // Add this external declaration
+  extern struct spinlock wait_lock;  // Add this external declaration
+
+  // Get arguments from user space
+  argint(0, &max);
+  argaddr(1, &uptr);
+
+  acquire(&wait_lock);  // Lock the process table
+  for (p = proc; p < &proc[NPROC] && count < max; p++) {
+    if (p->state == UNUSED)
+      continue;
+
+    // Populate user-space process struct
+    up.pid = p->pid;
+    up.state = p->state;
+    up.sz = p->sz;
+    safestrcpy(up.name, p->name, sizeof(up.name));
+
+    // Copy process info to user space
+    if (copyout(myproc()->pagetable, uptr + count * sizeof(struct uproc), (char *)&up, sizeof(struct uproc)) < 0) {
+      release(&wait_lock);
+      return -1;
+    }
+    count++;
+  }
+  release(&wait_lock);
+
+  return count;
+}
